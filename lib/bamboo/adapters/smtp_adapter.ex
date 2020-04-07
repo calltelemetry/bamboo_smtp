@@ -1,4 +1,5 @@
 defmodule Bamboo.SMTPAdapter do
+  require IEx
   @moduledoc """
   Sends email using SMTP.
 
@@ -71,11 +72,18 @@ defmodule Bamboo.SMTPAdapter do
       config
       |> to_gen_smtp_server_config
 
-    email
-    |> Bamboo.Mailer.normalize_addresses
-    |> to_gen_smtp_message
-    |> config[:transport].send_blocking(gen_smtp_config)
-    |> handle_response
+      # as of 0.15 bamboo does not catch the error for a 501 failure, and crashes the entire gen_server.
+    try do
+      email
+      |> Bamboo.Mailer.normalize_addresses
+      |> to_gen_smtp_message
+      |> config[:transport].send_blocking(gen_smtp_config)
+      |> handle_response
+
+      catch
+        e ->
+        handle_response({:error, :permenant_failure, "501 Permenant Error"})
+      end
   end
 
   @doc false
@@ -89,15 +97,20 @@ defmodule Bamboo.SMTPAdapter do
   def supports_attachments?, do: true
 
   defp handle_response({:error, :no_credentials = reason}) do
-    raise SMTPError, {reason, "Username and password were not provided for authentication."}
+    # raise SMTPError, {reason, "Username and password were not provided for authentication."}
+    Logger.info("Fatal Error sending email - no user or password")
+    {:error, reason, "Username and password were not provided for authentication."}
   end
 
   defp handle_response({:error, reason, detail}) do
-    raise SMTPError, {reason, detail}
+    Logger.info("Fatal Error sending email - " <> detail)
+    #Changed to support the response: true part of Bamboo, to return the response code up.
+    # raise SMTPError, {reason, detail}
+        {:error, reason, detail}
   end
 
   defp handle_response(response) do
-    {:ok, response}
+    {:ok, response, ""}
   end
 
   defp add_bcc(body, %Bamboo.Email{bcc: []}) do
@@ -356,7 +369,7 @@ defmodule Bamboo.SMTPAdapter do
     |> format_email(:to, false)
   end
 
-  defp to_gen_smtp_message(email = %Bamboo.Email{}) do
+  def to_gen_smtp_message(email = %Bamboo.Email{}) do
     {from_without_format(email), to_without_format(email), body(email)}
   end
 
